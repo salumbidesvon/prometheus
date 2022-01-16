@@ -1,0 +1,38 @@
+version: '3.9'
+
+volumes:
+  data: {}    
+
+services:
+  prometheus:
+    image: 'prom/prometheus:latest'
+    container_name: 'prometheus'
+    # restart: 'always'
+    volumes:
+      - "./data/prometheus:/usr/prometheus"
+      - "data:/prometheus"
+    command:
+      - '--config.file=/usr/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+      - '--web.console.templates=/usr/prometheus/consoles'
+      - '--web.console.libraries=/usr/prometheus/console_libraries'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+
+  node-exporter:
+    image: "prom/node-exporter:latest"
+    container_name: "node_exporter"
+    volumes:
+      - "/proc:/host/proc:ro"
+      - "/sys:/host/sys:ro"
+      - "/:/rootfs:ro"
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.ignored-mount-points="^(/rootfs|/host|)/(sys|proc|dev|host|etc)($$|/)"'
+      - '--collector.filesystem.ignored-fs-types="^(sys|proc|auto|cgroup|devpts|ns|au|fuse\.lxc|mqueue)(fs|)$$"'
+    ports:
+      - "9100:9100"
