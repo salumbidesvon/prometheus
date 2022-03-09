@@ -1,38 +1,111 @@
-version: '3.9'
+version: '3.7'
+
+networks:
+  monitoring:
 
 volumes:
-  data: {}  
-
-services:
+  grafana:
   prometheus:
-    image: 'prom/prometheus:latest'
-    container_name: 'prometheus'
-    # restart: 'always'
+  alertmanager:
+    
+services:
+  prom-ecs-discovery:
+    container_name: ecs-exporter
+    image: purexchange/promecssd:latest
+    build:
+      context: /var/lib/prometheus/file/prometheus-ecs-discovery-1.3.1
+    environment:
+      AWS_REGION: "us-east-2"
     volumes:
-      - "./data/prometheus:/usr/prometheus"
-      - "data:/prometheus"
+      - /var/lib/prometheus/configs/ecs_file_sd.yml:/ecs_file_sd.yml
+      - /var/lib/prometheus/configs/health:/health
     command:
-      - '--config.file=/usr/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=7d'
-      - '--web.console.templates=/usr/prometheus/consoles'
-      - '--web.console.libraries=/usr/prometheus/console_libraries'
-      - '--web.enable-lifecycle'
+      - '-config.filter-label=PROMETHEUS_EXPORTER_CLUSTER_NAME'
+    restart: always
+    networks:
+      - monitoring
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: always
+    volumes:
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+      - /var/lib/prometheus/data:/prometheus
+      - /var/lib/prometheus/configs/alerts.yml:/etc/prometheus/alerts.yml
+      - /var/lib/prometheus/configs/prometheus.yml:/etc/prometheus/prometheus.yml
+      - /var/lib/prometheus/configs/ecs_file_sd.yml:/etc/prometheus/ecs_file_sd.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
     ports:
-      - "9090:9090"
+      - 9090:9090
+    depends_on:
+      - prom-ecs-discovery
+      - node-exporter
+      - cadvisor
+      - alertmanager
+    networks:
+      - monitoring
 
   node-exporter:
-    image: "prom/node-exporter:latest"
-    container_name: "node_exporter"
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: always
     volumes:
-      - "/proc:/host/proc:ro"
-      - "/sys:/host/sys:ro"
-      - "/:/rootfs:ro"
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
     command:
+      - '--web.listen-address=:9500'
       - '--path.procfs=/host/proc'
       - '--path.sysfs=/host/sys'
       - '--path.rootfs=/rootfs'
       - '--collector.filesystem.ignored-mount-points="^(/rootfs|/host|)/(sys|proc|dev|host|etc)($$|/)"'
       - '--collector.filesystem.ignored-fs-types="^(sys|proc|auto|cgroup|devpts|ns|au|fuse\.lxc|mqueue)(fs|)$$"'
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - /var/lib/prometheus/grafana:/var/lib/grafana
     ports:
-      - "9100:9100"
+      - 80:3000
+    user: "1000"
+    networks:
+      - monitoring
+
+  cadvisor:
+    image: google/cadvisor:latest
+    container_name: cadvisor
+    restart: always
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks:
+      - monitoring
+
+  alertmanager:
+    container_name: alertmanager
+    image: prom/alertmanager
+    volumes:
+      - /var/lib/prometheus/alertmanager:/etc/alertmanager/
+      - /var/lib/prometheus/configs/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+    ports:
+      - "9093:9093"
+    networks:
+      - monitoring
+
